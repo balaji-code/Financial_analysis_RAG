@@ -1,60 +1,27 @@
-class SimpleVectorStore:
-    def __init__(self):
-        # Store everything in a single list for clarity
-        # Each item is a dict with: vector, metadata
-        self.items = []
+import json
+import numpy as np
+from pathlib import Path
 
-    def add(self, vector, metadata):
-        """
-        Add one embedded idea unit to the store.
-        vector   : list of numbers (embedding)
-        metadata : dict (year, bucket, segment, etc.)
-        """
-        self.items.append({
-            "vector": vector,
-            "metadata": metadata
-        })
+EMBEDDINGS = Path("data/embeddings/ITC_FY2023_embeddings.json")
 
-    def search(self, query_vector, filters, top_k=3):
-        """
-        Retrieve the most relevant items after applying metadata filters.
-        """
-        results = []
+def cosine_similarity(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-        for item in self.items:
-            metadata = item["metadata"]
+class VectorStore:
+    def __init__(self, path=EMBEDDINGS):
+        data = json.loads(path.read_text())
+        self.vectors = [d["vector"] for d in data]
+        self.meta = [d["metadata"] for d in data]
 
-            # 1. Apply filters FIRST
-            matches = True
-            for key, value in filters.items():
-                if metadata.get(key) != value:
-                    matches = False
-                    break
-
-            if not matches:
+    def search(self, query_vector, top_k=5, filter_fn=None):
+        scores = []
+        for i, v in enumerate(self.vectors):
+            if filter_fn and not filter_fn(self.meta[i]):
                 continue
+            sim = cosine_similarity(query_vector, v)
+            scores.append((sim, self.meta[i]))
 
-            # 2. Compute simple similarity score
-            score = self._simple_similarity(query_vector, item["vector"])
-
-            results.append({
-                "score": score,
-                "metadata": metadata,
-                "vector": item["vector"]
-            })
-
-        # 3. Rank by similarity (highest first)
-        results.sort(key=lambda x: x["score"], reverse=True)
-
-        # 4. Return top-k results
-        return results[:top_k]
-
-    def _simple_similarity(self, vec1, vec2):
-        """
-        Very simple similarity:
-        multiply corresponding numbers and sum them.
-        """
-        score = 0
-        for a, b in zip(vec1, vec2):
-            score += a * b
-        return score
+        scores.sort(reverse=True, key=lambda x: x[0])
+        return scores[:top_k]
